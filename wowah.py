@@ -26,22 +26,29 @@ class AuctionDataModel(Model):
         database        = DB_PROXY
 
 class Auction(AuctionDataModel):
-    auc_id              = IntegerField()
-    owner               = CharField(default=u'???', index=True)
-    owner_realm         = CharField(default=u'???')
+    auc_id              = IntegerField(index=True)
+    owner               = CharField(default=None, null=True, index=True)
+    owner_realm         = CharField(default=None, null=True)
 
-    quantity            = IntegerField(constraints=[Check('quantity > 0')])
-    buyout              = IntegerField(default=0)
+    quantity            = IntegerField(
+        constraints=[Check('quantity > 0')])
+    buyout              = IntegerField(null=True, index=True)
 
-    item_id             = IntegerField(index=True)
+    item_id             = IntegerField(index=True,
+        constraints=[Check('item_id > 0')])
     rand                = IntegerField(default=0)
     seed                = IntegerField(default=0)
     context             = IntegerField(default=0)
-    item_extra          = TextField(default=None, null=True)
 
-    is_active           = BooleanField(default=True)
     started_at          = DateTimeField(index=True)
     ended_at            = DateTimeField(default=None, null=True, index=True)
+
+    created_at          = DateTimeField(default=datetime.datetime.utcnow)
+
+    class Meta(AuctionDataModel._meta):
+        indexes         = (
+            (('auc_id', 'owner_realm', 'started_at'), True),
+        )
 
     # a mapping of model keys to json object keys
     KEY_MAP             = {
@@ -90,19 +97,20 @@ class Auction(AuctionDataModel):
         model_dict.update({k: obj[v] for k,v in cls.KEY_MAP.iteritems()})
         return model_dict
 
-    @property
-    def item_attributes(self):
-        if self.item_extra is not None:
-            return json.loads(self.item_extra)
-        else:
-            return None
-
 class Snapshot(AuctionDataModel):
     auction             = ForeignKeyField(Auction, related_name='snapshots')
-    timestamp           = DateTimeField()
+    timestamp           = DateTimeField(index=True)
 
-    bid                 = IntegerField(constraints=[Check('bid > 0')])
-    time_left           = CharField()
+    bid                 = IntegerField(
+        constraints=[Check('bid > 0')])
+    time_left           = IntegerField()
+
+    TIME_LEFT_ENUM      = {
+        'VERY_LONG':        48 * 60 * 60,
+        'LONG':             12 * 60 * 60,
+        'MEDIUM':            2 * 60 * 60,
+        'SHORT':                 30 * 60,
+    }
 
     @classmethod
     def json_obj2model_dict(cls, auction, obj, ts):
@@ -113,7 +121,22 @@ class Snapshot(AuctionDataModel):
             'time_left':    obj['timeLeft'],
         }
 
-MODELS = [Auction, Snapshot]
+class ItemBonus(AuctionDataModel):
+    auction             = ForeignKeyField(Auction, related_name='bonus_data')
+
+class PetMetadata(AuctionDataModel):
+    auction             = ForeignKeyField(Auction, related_name='pet_data')
+
+class AuctionResult(AuctionDataModel):
+    auction             = ForeignKeyField(Auction, related_name='result')
+
+class ParsedFiles(Model):
+    realm_key           = CharField()
+    timestamp           = DateTimeField()
+
+
+
+MODELS = [Auction, Snapshot, ItemBonus, PetMetadata]
 
 class DataSource(object):
     def __init__(self, path):
@@ -132,7 +155,10 @@ class DataSource(object):
             data_ts = datetime.datetime.utcfromtimestamp(
                 int(os.path.basename(data_filename).split('-')[1]) / 1000)
             logger.debug('Using timestamp: %s', data_ts)
-            yield (data_ts, data)
+            yield (data_ts, self._clean_data(data))
+
+    def _clean_data(self, data):
+        return data
 
     def _get_data_files(self):
         return sorted(glob.glob(os.path.join(self._path, '*.json.bz2')))
