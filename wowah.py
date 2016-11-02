@@ -102,9 +102,13 @@ class Auction(DataModel):
         bid_count = len([None for i in range(len(snaps)-1) if snaps[i+1].bid - snaps[i].bid])
         return bid_count
 
+    @property
+    def buyout_ppi(self):
+        return (self.buyout / self.quantity) if self.buyout is not None else None
+
     def estimate_ended_at(self):
-        if self.ended_at is not None:
-            return self.ended_at
+        # if self.ended_at is not None:
+        #     return self.ended_at
         snaps = sorted(self.snapshots, key=lambda s: s.timestamp)
         return self.started_at + \
             (datetime.timedelta(seconds=snaps[0].time_left) - \
@@ -117,25 +121,28 @@ class Auction(DataModel):
             raise ValueError('Auction has not ended')
         if self.est_result is not None and not force:
             return self.est_result
-        snaps = Snapshot.select().where(Snapshot.auction == self).order_by(Snapshot.timestamp).asc()
+        snaps = Snapshot.select().where(Snapshot.auction == self).order_by(Snapshot.timestamp.asc())
         auction_siblings = self.get_siblings()
         final_snapshot_siblings = snaps[-1].get_siblings()
 
         run_time = self.ended_at - self.started_at
         time_expired = snaps[-1].time_left <= Snapshot.TIME_LEFT_ENUM['MEDIUM']
-        had_bids = snaps[0].bid != max(s.bid for s in snaps[1:])
+        had_bids = snaps[0].bid != max(s.bid for s in snaps)
         was_bid_only = self.buyout is None
-        was_lowest_bid = snaps[-1].bid == min(s.bid for s in final_snapshot_siblings) or \
+        was_lowest_bid = (len(final_snapshot_siblings) == 0) or \
+            (snaps[-1].bid_ppi == min(s.bid_ppi for s in final_snapshot_siblings) or \
             all(s.auction.ended_at == self.ended_at for s in final_snapshot_siblings \
-                if s.bid < snaps[-1].bid)
+                if s.bid_ppi < snaps[-1].bid_ppi))
         # have to include the bid_only condition or the results might not make sense
         was_lowest_buyout = (not was_bid_only) and \
-            (self.buyout == min(a.buyout for a in auction_siblings) or \
-                all(a.ended_at == self.ended_at for a in auction_siblings \
-                    if a.buyout < self.buyout))
+            ((len(auction_siblings) == 0) or \
+            ((self.buyout_ppi == min(a.buyout_ppi for a in auction_siblings) or \
+            all(a.ended_at == self.ended_at for a in auction_siblings \
+                if a.buyout_ppi < self.buyout_ppi))))
 
         if time_expired:
-            if had_bids or (was_lowest_bid and run_time > Snapshot.TIME_LEFT_ENUM['LONG']):
+            if had_bids or (was_lowest_bid and \
+                    run_time.total_seconds() > Snapshot.TIME_LEFT_ENUM['LONG']):
                 result = 'WON_BID'
             else:
                 result = 'EXPIRED'
@@ -153,7 +160,8 @@ class Auction(DataModel):
     def get_siblings(self, strict=False):
         conditions = \
             (Auction.id != self.id) & \
-            (Auction.item_id == self.item_id)
+            (Auction.item_id == self.item_id) & \
+            Auction.buyout.is_null(self.buyout is None)
         if self.ended_at is None:
             conditions &= \
                 ((Auction.started_at >= self.started_at) | \
@@ -162,7 +170,7 @@ class Auction(DataModel):
             conditions &= \
                 (Auction.started_at.between(self.started_at, self.ended_at) | \
                 Auction.ended_at.between(self.started_at, self.ended_at))
-        return Auction.select().where(conditions).order_by(Auction.started_at).asc()
+        return Auction.select().where(conditions).order_by(Auction.started_at.asc())
 
 class Snapshot(DataModel):
     auction             = ForeignKeyField(Auction, related_name='snapshots')
@@ -187,6 +195,10 @@ class Snapshot(DataModel):
             'bid':          obj['bid'],
             'time_left':    obj['timeLeft'],
         }
+
+    @property
+    def bid_ppi(self):
+        return self.bid / self.auction.quantity
 
     def get_siblings(self, strict=True):
         return Snapshot.select().join(Auction).where(
