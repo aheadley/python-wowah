@@ -24,6 +24,8 @@ LOG_HANDLER.setFormatter(LOG_FORMAT)
 logger.addHandler(LOG_HANDLER)
 logger.setLevel(logging.DEBUG)
 
+OPTION_DISABLE_PROGRESS_BAR         = True
+
 class GlobalMeta:
     database            = Proxy()
 
@@ -259,7 +261,7 @@ class DataSource(object):
     def _clean_data(self, data, ts, realm_hash):
         logger.debug('Pre-processing dump data...')
         realms = {r['name']: r['slug'] for r in data['realms']}
-        for a in tqdm(data['auctions']):
+        for a in tqdm(data['auctions'], disable=OPTION_DISABLE_PROGRESS_BAR):
             if a['owner'] == '???':
                 a['owner'] = None
             a['ownerRealm'] = realms.get(a['ownerRealm'])
@@ -307,7 +309,7 @@ class DataManager(object):
             ended_aids = list(active_aids - set(a['auc'] for a in data['auctions']))
             logger.debug('Found ended auction IDs: %d', len(ended_aids))
             with GlobalMeta.database.atomic():
-                for i in tqdm(range(0, len(ended_aids), batch_size)):
+                for i in tqdm(range(0, len(ended_aids), batch_size), disable=OPTION_DISABLE_PROGRESS_BAR):
                     Auction.update(ended_at=ts).where(
                         (Auction.auc_id << ended_aids[i:i+batch_size]) & #probably over a size limit
                         Auction.started_at.between(ts - dt, ts)
@@ -318,7 +320,7 @@ class DataManager(object):
             new_auctions = [a for a in data['auctions'] if a['auc'] not in active_aids]
             logger.debug('Found new auctions: %d', len(new_auctions))
             with GlobalMeta.database.atomic():
-                for i in tqdm(range(0, len(new_auctions), batch_size)):
+                for i in tqdm(range(0, len(new_auctions), batch_size), disable=OPTION_DISABLE_PROGRESS_BAR):
                     Auction.insert_many(
                         [Auction.from_json(a, ts) for a in new_auctions[i:i+batch_size]]
                     ).execute()
@@ -330,7 +332,7 @@ class DataManager(object):
             del new_auctions
             logger.debug('Inserting new auction snapshots: %d', len(new_auction_models))
             with GlobalMeta.database.atomic():
-                for i in tqdm(range(0, len(new_auction_models), batch_size)):
+                for i in tqdm(range(0, len(new_auction_models), batch_size), disable=OPTION_DISABLE_PROGRESS_BAR):
                     Snapshot.insert_many(
                         [Snapshot.from_json(new_auction_models[aid], new_auction_objs[aid], ts) \
                             for aid in new_aids[i:i+batch_size]]
@@ -342,7 +344,7 @@ class DataManager(object):
             ))
             logger.debug('Inserting new item attributes: %d', len(new_item_metas))
             with GlobalMeta.database.atomic():
-                for i in tqdm(range(0, len(new_item_metas), batch_size)):
+                for i in tqdm(range(0, len(new_item_metas), batch_size), disable=OPTION_DISABLE_PROGRESS_BAR):
                     ItemAttribute.insert_many(new_item_metas[i:i+batch_size]).execute()
             del new_auction_models
             # del new_auction_objs
@@ -359,7 +361,7 @@ class DataManager(object):
             del new_snapshots
             logger.debug('Inserting old auction snapshots: %d', len(new_snapshot_models))
             with GlobalMeta.database.atomic():
-                for i in tqdm(range(0, len(new_snapshot_models), batch_size)):
+                for i in tqdm(range(0, len(new_snapshot_models), batch_size), disable=OPTION_DISABLE_PROGRESS_BAR):
                     Snapshot.insert_many(
                         [Snapshot.from_json(new_snapshot_models[aid], new_snapshot_objs[aid], ts) \
                             for aid in new_aids[i:i+batch_size]]
@@ -376,9 +378,11 @@ if __name__ == '__main__':
 
     parser.add_option('-b', '--batch-size', type='int', default=50)
     parser.add_option('--day-buffer', type='int', default=7)
+    parser.add_option('-p', '--progress', action='store_true', default=False)
 
     opts, args = parser.parse_args()
     data_path, db_addr = args
+    OPTION_DISABLE_PROGRESS_BAR = not opts.progress
 
     GlobalMeta.database.initialize(db_connect(db_addr))
     GlobalMeta.database.create_tables(MODELS, safe=True)
