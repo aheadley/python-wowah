@@ -3,7 +3,9 @@ select
         datetime(
             strftime('%s', ended_at)
                 + (random() % (60 * 30 - 1)),
-            'unixepoch') as ts
+            'unixepoch') as ts,
+        quantity,
+        (strftime('%s', ended_at) - strftime('%s', started_at)) / 3600 as runtime
     from auction
     where item_id = ITEM_ID
         and buyout is not NULL
