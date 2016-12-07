@@ -9,13 +9,10 @@ set title 'Price History'
 set autoscale x
 set grid
 
-#set palette rgb -21,-22,-23
-#set palette negative
-
 set palette maxcolors 100
 set palette defined (0 "red", 99 "blue")
-
+set cblabel 'Hours Active'
 
 plot "< sed \"s/ITEM_ID/$ITEM_ID/\" contrib/item-price-history.sql | sqlite3 $DB_FILE" \
-    using 2:1:($3 / 10):4 \
+    using 2:1:(($3 * 2) ** 0.5):4 \
     with points pt 7 ps variable lc palette

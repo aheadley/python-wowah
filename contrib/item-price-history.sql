@@ -4,7 +4,7 @@ select
             strftime('%s', ended_at)
                 + (random() % (60 * 30 - 1)),
             'unixepoch') as ts,
-        quantity,
+        CAST(quantity as float) / (select max(quantity) from auction where item_id = ITEM_ID) as qs,
         (strftime('%s', ended_at) - strftime('%s', started_at)) / 3600 as runtime
     from auction
     where item_id = ITEM_ID
