@@ -12,7 +12,7 @@ import itertools
 
 # import peewee
 from peewee import *
-from playhouse.db_url import connect as db_connect
+from playhouse.db_url import connect as db_url_connect
 from tqdm import tqdm
 
 # logging.basicConfig(level=logging.DEBUG)
@@ -237,6 +237,12 @@ class ParsedFile(DataModel):
 
 MODELS = [Auction, Snapshot, ItemAttribute, ParsedFile]
 
+def db_connect(db_url, meta_model=GlobalMeta):
+    db = db_url_connect(db_url)
+    meta_model.database.initialize(db)
+    meta_model.database.create_tables(MODELS, safe=True)
+    return db
+
 class DataSource(object):
     RE_DATA_FN = re.compile(r'auctions-(?P<ts>[0-9]{13})-(?P<hash>[0-9a-f]{32})\.json(?:\.bz2)?')
 
@@ -386,11 +392,10 @@ if __name__ == '__main__':
     parser.add_option('-s', '--skip-before', type='int', default=0)
 
     opts, args = parser.parse_args()
-    data_path, db_addr = args
+    data_path, db_url = args
     OPTION_DISABLE_PROGRESS_BAR = not opts.progress
 
-    GlobalMeta.database.initialize(db_connect(db_addr))
-    GlobalMeta.database.create_tables(MODELS, safe=True)
+    db_connect(db_url)
 
     ds = DataSource(data_path, opts.skip_before)
     dm = DataManager()
