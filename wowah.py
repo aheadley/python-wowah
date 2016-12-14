@@ -240,13 +240,19 @@ MODELS = [Auction, Snapshot, ItemAttribute, ParsedFile]
 class DataSource(object):
     RE_DATA_FN = re.compile(r'auctions-(?P<ts>[0-9]{13})-(?P<hash>[0-9a-f]{32})\.json(?:\.bz2)?')
 
-    def __init__(self, path):
+    def __init__(self, path, skip_before=0):
+        self._skip_before = datetime.datetime.utcfromtimestamp(skip_before)
         self._path = path.rstrip('/')
 
     def __iter__(self):
         # auctions-1478015194000-e02305572b12efe069bed00ba1106f77.json.bz2
         for data_filename in self._get_data_files():
+            dump_ts, realm_hash = self._parse_fn(data_filename)
+            if dump_ts <= self._skip_before:
+                logger.debug('Skipping file: %s', data_filename)
+                continue
             logger.info('Reading from: %s', data_filename)
+            logger.debug('Using timestamp: %s', dump_ts)
             with bz2.BZ2File(data_filename, 'r') as data_handle:
                 try:
                     data = json.load(data_handle)
@@ -254,8 +260,6 @@ class DataSource(object):
                     logger.exception(err)
                     continue
             logger.debug('Found %06d auctions...', len(data['auctions']))
-            dump_ts, realm_hash = self._parse_fn(data_filename)
-            logger.debug('Using timestamp: %s', dump_ts)
             yield self._clean_data(data, dump_ts, realm_hash)
 
     def _clean_data(self, data, ts, realm_hash):
@@ -379,6 +383,7 @@ if __name__ == '__main__':
     parser.add_option('-b', '--batch-size', type='int', default=50)
     parser.add_option('--day-buffer', type='int', default=7)
     parser.add_option('-p', '--progress', action='store_true', default=False)
+    parser.add_option('-s', '--skip-before', type='int', default=0)
 
     opts, args = parser.parse_args()
     data_path, db_addr = args
@@ -387,6 +392,6 @@ if __name__ == '__main__':
     GlobalMeta.database.initialize(db_connect(db_addr))
     GlobalMeta.database.create_tables(MODELS, safe=True)
 
-    ds = DataSource(data_path)
+    ds = DataSource(data_path, opts.skip_before)
     dm = DataManager()
     dm.import_data(ds, batch_size=opts.batch_size, day_buffer=opts.day_buffer)
